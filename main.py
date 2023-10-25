@@ -19,35 +19,25 @@ def DBMS_Connection(query, values=''):
     return result
 
 # Объединенная функция регистрации и авторизации
-def RegAuth(message, mode):
-    bot.send_message(message.chat.id, "Введите логин:")
-    bot.register_next_step_handler(message, process_name_reg_auth, mode)
-
-def process_name_reg_auth(message, mode):
+def process_reg_log(message, mode):
     login = message.text
-    result = DBMS_Connection('SELECT * FROM users WHERE username = ?', (login,))
-    
-    if mode == 'reg':    
-        if result is not None:
-            msg = bot.send_message(message.chat.id, f'Пользователь с логином {login} уже существует')
-        else:
-            bot.send_message(message.chat.id, "Введите пароль:")
-            bot.register_next_step_handler(message, process_password_reg_auth, login, mode)
-    elif mode == 'log':
-        if result is None:
-            msg = bot.send_message(message.chat.id, f'Пользователя с таким логином {login} не существует')
-        else:
-            bot.send_message(message.chat.id, "Введите пароль:")
-            bot.register_next_step_handler(message, process_password_reg_auth, login, mode)
+    user_exist = DBMS_Connection('SELECT * FROM users WHERE username = ?', (login,)) is not None
 
-def process_password_reg_auth(message, login, mode):
+    if user_exist and mode == 'reg':
+        bot.send_message(message.chat.id, f'Пользователь с логином {login} уже существует')
+    elif not user_exist and mode == 'log':
+        bot.send_message(message.chat.id, f'Пользователя с таким логином {login} не существует')
+    else:
+        bot.send_message(message.chat.id, "Введите пароль:")
+        bot.register_next_step_handler(message, process_password, login, mode)
+
+def process_password(message, login, mode):
     password = message.text
 
     if mode == 'reg':
-        DBMS_Connection(f"""
-            INSERT INTO users (chat_id, username, password, role) VALUES (?, ?, ?, ?)""",
-            (message.chat.id, login, password, 'student')
-            )
+        DBMS_Connection("INSERT INTO users (chat_id, username, password, role) VALUES (?, ?, ?, ?)",
+                        (message.chat.id, login, password, 'student')
+                        )
         bot.send_message(message.chat.id, "Вы успешно зарегистрированы")
     elif mode == 'log':
         stored_password = DBMS_Connection("SELECT password FROM users WHERE username = ?", (login,))[0]
@@ -73,16 +63,13 @@ def start_handler(message):
     bot.send_message(message.chat.id, "Здравствуйте\nЕсли у Вас уже есть аккаунт, введите /login. \nЕсли нет - /register")
 
 # =========================
-# Обработка команды регестрации
-@bot.message_handler(commands=['register'])
-def register_handler(message):
-    RegAuth(message, 'reg')
-
-# =========================
-# Обработка команды авторизации
-@bot.message_handler(commands=['login'])
-def login_handler(message):
-    RegAuth(message, 'log')
+# Обработка команд регистрация и авторизация
+@bot.message_handler(commands=['register', 'login'])
+def reg_log_handler(message):
+    mode = 'reg' if message.text == '/register' else 'log'
+    
+    bot.send_message(message.chat.id, "Введите логин:")
+    bot.register_next_step_handler(message, process_reg_log, mode)
 
 # =========================
 
