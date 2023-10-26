@@ -79,9 +79,8 @@ def process_password(message, login, mode):
         
         if stored_password == password:
             update_session_and_notify(message.chat.id, login)
-            # DBMS_Connection("UPDATE users SET chat_id = ? WHERE login = ?", (message.chat.id, login))
-
-            bot.send_message(message.chat.id, "Вы успешно авторизовались")
+            
+            start_handler(message)
         else:
             bot.send_message(message.chat.id, "Неверный пароль")
 
@@ -102,6 +101,35 @@ def update_session_and_notify(chat_id, login):
 # Функция для разлогинивания пользователя.
 def logout(chat_id):
     DBMS_Connection('UPDATE users SET chat_id = NULL WHERE chat_id = ?', (chat_id,))
+    
+# Определение клавиатур
+def get_student_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+
+    button1 = types.KeyboardButton('Расписание')
+    button2 = types.KeyboardButton('Учебный план')
+    button3 = types.KeyboardButton('Материалы')
+    button4 = types.KeyboardButton('Контакты')
+    button5 = types.KeyboardButton('Информация об отделениях')
+    button6 = types.KeyboardButton('Выход')
+
+    # Добавление кнопок на клавиатуру
+    markup.row(button1, button2)
+    markup.row(button3)
+    markup.row(button4, button5)
+    markup.row(button6)
+
+    return markup
+
+def get_unauthorized_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    button1 = types.KeyboardButton('/login')
+    button2 = types.KeyboardButton('/register')
+
+    # Добавление кнопок на клавиатуру
+    markup.row(button1, button2)
+
+    return markup
 
 # =========================
 # Обработка команды start
@@ -111,15 +139,11 @@ def start_handler(message):
 
     if login:
         if role == 'student':
-            markup = types.ReplyKeyboardMarkup(one_time_keyboard=True)
-            markup.add('Студенческая кнопка 1', 'Студенческая кнопка 2')
-            bot.send_message(message.chat.id, f"Здравствуйте, {login}. Вы вошли как студент.", reply_markup=markup)
+            bot.send_message(message.chat.id, f"Здравствуйте, {login}. Вы вошли как студент.", reply_markup=get_student_keyboard())
         elif role == 'teacher':
-            markup = types.ReplyKeyboardMarkup(one_time_keyboard=True)
-            markup.add('Учителю кнопка 1', 'Учителю кнопка 2')
-            bot.send_message(message.chat.id, f"Здравствуйте, {login}. Вы вошли как преподаватель.", reply_markup=markup)
+            bot.send_message(message.chat.id, f"Здравствуйте, {login}. Вы вошли как преподаватель.")
     else:
-        bot.send_message(message.chat.id, "Здравствуйте\nЕсли у Вас уже есть аккаунт, введите /login. \nЕсли нет - /register")
+        bot.send_message(message.chat.id, "Здравствуйте\nЕсли у Вас уже есть аккаунт, введите /login. \nЕсли нет - /register", reply_markup=get_unauthorized_keyboard())
 
 # =========================
 # Обработка команд регистрация и авторизация
@@ -135,6 +159,7 @@ def reg_log_handler(message):
 @bot.message_handler(commands=['logout'])
 def logout_handler(message):
     logout(message.chat.id)
+    start_handler(message)
     bot.send_message(message.chat.id, "Вы успешно вышли из аккаунта.")
 
 
