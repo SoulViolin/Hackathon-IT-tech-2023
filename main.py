@@ -4,11 +4,14 @@ from settings import *
 import telebot
 from telebot import types
 from cryptography.fernet import Fernet
+from contextlib import closing
 import sqlite3
 import json
 
 bot = telebot.TeleBot(token, parse_mode=None)
 _last_msg_id = None
+_last_msg_text = None
+_current_page = 0
 
 def DBMS_Connection(query, values=''):
     conn = sqlite3.connect('TechnicalSchool.db')
@@ -193,7 +196,17 @@ def get_teacher_keyboard():
     return markup
 
 def get_admin_keyboard():
-    markup = get_student_keyboard()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    button1 = types.KeyboardButton('Просмотр данных')
+    button2 = types.KeyboardButton('Создание данных')
+    button3 = types.KeyboardButton('Обновление данных')
+    button4 = types.KeyboardButton('Удаление данных')
+    button5 = types.KeyboardButton('Выход')
+
+    markup.row(button1, button3)
+    markup.row(button2,button4)
+    markup.row(button5)
+
     return markup
 
 def get_unauthorized_keyboard():
@@ -221,6 +234,91 @@ def start_handler(message):
             bot.send_message(message.chat.id, f"Здравствуйте, {login}. Вы вошли как администратор.", reply_markup=get_admin_keyboard())
     else:
         bot.send_message(message.chat.id, "Здравствуйте\nЕсли у Вас уже есть аккаунт, введите <b>Авторизация</b>. \nЕсли нет - <b>Регистрация</b>", parse_mode="HTML", reply_markup=get_unauthorized_keyboard())
+
+# =========================
+# Права администратора
+def admin_CRUD_operations(table_name, operation, values=None, condition=None):
+    conn = sqlite3.connect('TechnicalSchool.db')
+    cur = conn.cursor()
+
+    if operation == 'create':
+        query = f"INSERT INTO {table_name} VALUES ({', '.join('?' * len(values))})"
+        cur.execute(query, values)
+        
+    elif operation == 'read':
+        query = f"SELECT * FROM {table_name}"
+        if condition:
+            query += f" WHERE {condition}"
+        cur.execute(query)
+        result = cur.fetchall()
+        conn.close()
+        return result
+    
+    elif operation == 'update':
+        set_values = ', '.join([f'{key} = ?' for key in values.keys()])
+        query = f"UPDATE {table_name} SET {set_values} WHERE {condition}"
+        cur.execute(query, list(values.values()))
+        
+    elif operation == 'delete':
+        query = f"DELETE FROM {table_name} WHERE {condition}"
+        cur.execute(query)
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+
+@bot.message_handler(func=lambda message: message.text == "Просмотр данных")
+def handle_view_data_button(message):
+    msg = bot.reply_to(message, "Введите имя таблицы:")
+    bot.register_next_step_handler(msg, view_data)
+
+def view_data(message):
+    table_name = message.text
+    result = admin_CRUD_operations(table_name, "read")
+    bot.send_message(message.chat.id, str(result))
+
+@bot.message_handler(func=lambda message: message.text == "Создание данных")
+def handle_create_data_button(message):
+    bot.send_message(message.chat.id, "Введите имя таблицы")
+    bot.register_next_step_handler(message, ask_data_for_create)
+
+def ask_data_for_create(message):
+    table_name = message.text
+    bot.send_message(message.chat.id, "Введите данные в формате JSON")
+    bot.register_next_step_handler(message, lambda msg: create_data(msg, table_name))
+
+def create_data(message, table_name):
+    data = json.loads(message.text)
+    admin_CRUD_operations(table_name, "create", values=data)
+
+@bot.message_handler(func=lambda message: message.text == "Обновление данных")
+def handle_update_data_button(message):
+    bot.send_message(message.chat.id, "Введите имя таблицы")
+    bot.register_next_step_handler(message, ask_data_for_update)
+
+def ask_data_for_update(message):
+    table_name = message.text
+    bot.send_message(message.chat.id, "Введите данные и условие в формате JSON {'values': {...}, 'condition': '...'}")
+    bot.register_next_step_handler(message, lambda msg: update_data(msg, table_name))
+
+def update_data(message, table_name):
+    data = json.loads(message.text)
+    admin_CRUD_operations(table_name, "update", values=data["values"], condition=data["condition"])
+
+@bot.message_handler(func=lambda message: message.text == "Удаление данных")
+def handle_delete_data_button(message):
+
+    bot.send_message(message.chat.id, "Введите имя таблицы")
+    bot.register_next_step_handler(message, ask_condition_for_delete)
+
+def ask_condition_for_delete(message):
+    table_name = message.text
+    bot.send_message(message.chat.id, "Введите условие для удаления (при необходимости)")
+    bot.register_next_step_handler(message, lambda msg: delete_data(msg, table_name))
+
+def delete_data(message, table_name):
+    condition = message.text if message.text.strip() != "" else None
+    admin_CRUD_operations(table_name, "delete", condition=condition)
 
 # =========================
 # Обработчик для кнопки с текстом "Выход"
@@ -264,13 +362,17 @@ def get_teacher_pages(teachers, teachers_per_page=3):
     return [teachers[i:i+teachers_per_page] for i in range(0, len(teachers), teachers_per_page)]
 
 def show_teacher_info(conn, message, teacher_name):
-    global _last_msg_id
+    global _last_msg_id, _last_msg_text
     teacher_info = get_teacher_info(conn, teacher_name)
-    if _last_msg_id is not None:
-        bot.edit_message_text(chat_id=message.chat.id, message_id=_last_msg_id, text=f"{teacher_name}:\n {teacher_info}")
-    else:
-        sent_msg = bot.send_message(message.chat.id, f"{teacher_name}:\n {teacher_info}")
-        _last_msg_id = sent_msg.message_id
+    new_text = f"{teacher_name}:\n {teacher_info}"
+    if _last_msg_text != new_text:
+        if _last_msg_id is not None:
+            bot.edit_message_text(chat_id=message.chat.id, message_id=_last_msg_id, text=new_text)
+            _last_msg_text = new_text
+        else:
+            sent_msg = bot.send_message(message.chat.id, new_text)
+            _last_msg_id = sent_msg.message_id
+            _last_msg_text = new_text
 
 def create_teacher_buttons(page, pages_count):
     keyboard = types.InlineKeyboardMarkup()
@@ -332,11 +434,9 @@ def handle_query(call):
         teacher_name = call.data.split(':', 1)[1]
         show_teacher_info(conn, call.message, teacher_name)
     elif call.data == 'next':
-        _last_msg_id = None 
         _current_page += 1
         edit_teachers(call.message)
     elif call.data == 'prev':
-        _last_msg_id = None 
         _current_page -= 1
         edit_teachers(call.message)
 
