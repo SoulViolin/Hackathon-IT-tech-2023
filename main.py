@@ -8,6 +8,7 @@ import sqlite3
 import json
 
 bot = telebot.TeleBot(token, parse_mode=None)
+_last_msg_id = None
 
 def DBMS_Connection(query, values=''):
     conn = sqlite3.connect('TechnicalSchool.db')
@@ -263,8 +264,13 @@ def get_teacher_pages(teachers, teachers_per_page=3):
     return [teachers[i:i+teachers_per_page] for i in range(0, len(teachers), teachers_per_page)]
 
 def show_teacher_info(conn, message, teacher_name):
+    global _last_msg_id
     teacher_info = get_teacher_info(conn, teacher_name)
-    bot.send_message(message.chat.id, f"{teacher_name}:\n {teacher_info}")
+    if _last_msg_id is not None:
+        bot.edit_message_text(chat_id=message.chat.id, message_id=_last_msg_id, text=f"{teacher_name}:\n {teacher_info}")
+    else:
+        sent_msg = bot.send_message(message.chat.id, f"{teacher_name}:\n {teacher_info}")
+        _last_msg_id = sent_msg.message_id
 
 def create_teacher_buttons(page, pages_count):
     keyboard = types.InlineKeyboardMarkup()
@@ -293,6 +299,23 @@ def send_teachers(message):
     pages_count = len(teacher_pages)
     bot.send_message(message.chat.id, "Вот список преподавателей:", reply_markup=create_teacher_buttons(teacher_pages[_current_page], pages_count))
 
+def edit_teachers(message):
+    global _current_page
+    conn = get_db_connection()
+
+    all_teachers = get_all_teachers(conn)
+    teacher_pages = get_teacher_pages(all_teachers)
+
+    if not teacher_pages:  # add this check
+        bot.edit_message_text("Преподаватели отсутствуют.", chat_id=message.chat.id, message_id=message.message_id)
+        return
+
+    if _current_page < 0: _current_page = 0
+    if _current_page >= len(teacher_pages): _current_page = len(teacher_pages) - 1
+
+    pages_count = len(teacher_pages)
+    bot.edit_message_text("Вот список преподавателей:", chat_id=message.chat.id, message_id=message.message_id, reply_markup=create_teacher_buttons(teacher_pages[_current_page], pages_count))
+
 @bot.message_handler(func=lambda message: message.text == "Контактные данные")
 def handle_contact_details(message):
     global _current_page
@@ -301,23 +324,21 @@ def handle_contact_details(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
-    global _current_page
+    global _current_page, _last_msg_id
     conn = get_db_connection()
 
     if call.data.startswith('info:'):
-        teacher_name = call.data[5:]  # remove 'info:' prefix
+        # _last_msg_id = None
+        teacher_name = call.data.split(':', 1)[1]
         show_teacher_info(conn, call.message, teacher_name)
-
-    elif call.data == 'prev':
-        _current_page -= 1
-        send_teachers(call.message)
-
     elif call.data == 'next':
+        _last_msg_id = None 
         _current_page += 1
-        send_teachers(call.message)
-
-    else:
-        bot.answer_callback_query(callback_query_id=call.id, text="Неизвестная команда")
+        edit_teachers(call.message)
+    elif call.data == 'prev':
+        _last_msg_id = None 
+        _current_page -= 1
+        edit_teachers(call.message)
 
 # =========================
 

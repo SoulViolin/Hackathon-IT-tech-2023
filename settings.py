@@ -4,4 +4,5 @@ import dotenv
 dotenv.load_dotenv('.env')
 
 token = os.environ["token"]
-# password = os.environ["password"]
+key = os.environ["key"]
+encrypted_data  = os.environ["encrypted_data"]
