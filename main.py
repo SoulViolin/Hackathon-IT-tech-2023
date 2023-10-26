@@ -225,9 +225,11 @@ def start_handler(message):
 # Обработчик для кнопки с текстом "Выход"
 @bot.message_handler(func=lambda message: message.text == "Выход")
 def handle_logout_button(message):
+    logout(message.chat.id)
     start_handler(message)
     bot.send_message(message.chat.id, "Вы успешно вышли из аккаунта.")
 
+# =========================
 # Обработчик для кнопки с текстом "Авторизация"
 @bot.message_handler(func=lambda message: message.text in ["Авторизация", "Регистрация"])
 def reg_log_handler(message):
@@ -236,10 +238,87 @@ def reg_log_handler(message):
     bot.send_message(message.chat.id, "Введите логин:")
     bot.register_next_step_handler(message, process_reg_log, mode)
 
-# Обработчик для кнопки с текстом "Контакты"
+# =============================================================================
+# Обработчик для кнопки с текстом "Контактные данные"
+def get_db_connection():
+    return sqlite3.connect('TechnicalSchool.db')
+
+def get_all_teachers(conn):
+    cur = conn.cursor()
+    cur.execute('SELECT first_name, last_name, patronymic FROM teacher_info')
+    teachers = [f"{t[0]} {t[1]} {t[2]}" for t in cur.fetchall()]
+    cur.close()
+    return teachers
+
+def get_teacher_info(conn, teacher_name):
+    cur = conn.cursor()
+    first_name, last_name, patronymic = teacher_name.split(' ')
+    cur.execute('SELECT * FROM teacher_info WHERE first_name = ? AND last_name = ? AND patronymic = ?',
+                (first_name, last_name, patronymic))
+    teacher_info = cur.fetchone()
+    cur.close()
+    return teacher_info
+
+def get_teacher_pages(teachers, teachers_per_page=3):
+    return [teachers[i:i+teachers_per_page] for i in range(0, len(teachers), teachers_per_page)]
+
+def show_teacher_info(conn, message, teacher_name):
+    teacher_info = get_teacher_info(conn, teacher_name)
+    bot.send_message(message.chat.id, f"{teacher_name}:\n {teacher_info}")
+
+def create_teacher_buttons(page, pages_count):
+    keyboard = types.InlineKeyboardMarkup()
+    for teacher in page:
+        keyboard.add(types.InlineKeyboardButton(text=teacher, callback_data=f"info:{teacher}"))
+    keyboard.add(
+        types.InlineKeyboardButton(text="<<", callback_data="prev") if _current_page != 0 else types.InlineKeyboardButton(text=" ", callback_data="none"),
+        types.InlineKeyboardButton(text=">", callback_data="next") if _current_page != pages_count - 1  else types.InlineKeyboardButton(text=" ", callback_data="none")
+    )
+    return keyboard
+
+def send_teachers(message):
+    global _current_page
+    conn = get_db_connection()
+
+    all_teachers = get_all_teachers(conn)
+    teacher_pages = get_teacher_pages(all_teachers)
+
+    if not teacher_pages:  # добавьте эту проверку
+        bot.send_message(message.chat.id, "Преподаватели отсутствуют.")
+        return
+
+    if _current_page < 0: _current_page = 0
+    if _current_page >= len(teacher_pages): _current_page = len(teacher_pages) - 1
+
+    pages_count = len(teacher_pages)
+    bot.send_message(message.chat.id, "Вот список преподавателей:", reply_markup=create_teacher_buttons(teacher_pages[_current_page], pages_count))
+
 @bot.message_handler(func=lambda message: message.text == "Контактные данные")
-def handle_logout_button(message):
-    start_handler(message)
-    bot.send_message(message.chat.id, "Вы успешно вышли из аккаунта.")
+def handle_contact_details(message):
+    global _current_page
+    _current_page = 0 
+    send_teachers(message)
+
+@bot.callback_query_handler(func=lambda call: True)
+def handle_query(call):
+    global _current_page
+    conn = get_db_connection()
+
+    if call.data.startswith('info:'):
+        teacher_name = call.data[5:]  # remove 'info:' prefix
+        show_teacher_info(conn, call.message, teacher_name)
+
+    elif call.data == 'prev':
+        _current_page -= 1
+        send_teachers(call.message)
+
+    elif call.data == 'next':
+        _current_page += 1
+        send_teachers(call.message)
+
+    else:
+        bot.answer_callback_query(callback_query_id=call.id, text="Неизвестная команда")
+
+# =========================
 
 bot.polling(none_stop=True)
