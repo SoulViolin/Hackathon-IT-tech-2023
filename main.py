@@ -63,6 +63,7 @@ DBMS_Connection('''
            patronymic TEXT, 
            lesson TEXT, 
            office TEXT, 
+           number Text,
            FOREIGN KEY (login) REFERENCES users (login))
           ''')
 
@@ -133,6 +134,7 @@ def process_password(message, login, password, mode):
                         (message.chat.id, login, password, 'student')
                         )
         bot.send_message(message.chat.id, f"Вы были зарегистрированы как студент")
+    start_handler(message)
 
 # Проверяет, авторизован ли пользователь, и возвращает его login и role, если он авторизован 
 def check_auth(chat_id):
@@ -158,8 +160,8 @@ def get_student_keyboard():
 
     button1 = types.KeyboardButton('Расписание')
     button2 = types.KeyboardButton('Учебный план')
-    button3 = types.KeyboardButton('Материалы')
-    button4 = types.KeyboardButton('Контакты')
+    button3 = types.KeyboardButton('Контактные данные')
+    button4 = types.KeyboardButton('Материалы')
     button5 = types.KeyboardButton('Информация об отделениях')
     button6 = types.KeyboardButton('Заявления')
     button7 = types.KeyboardButton('Выход', )
@@ -178,13 +180,14 @@ def get_teacher_keyboard():
     button1 = types.KeyboardButton('Расписание')
     button2 = types.KeyboardButton('Заявления')
     button3 = types.KeyboardButton('Материалы')
-    button4 = types.KeyboardButton('Контакты')
+    button4 = types.KeyboardButton('Контактные данные')
     button5 = types.KeyboardButton('Выход', )
 
     # Добавление кнопок на клавиатуру
     markup.row(button1, button2)
     markup.row(button3)
-    markup.row(button4, button5)
+    markup.row(button4)
+    markup.row(button5)
 
     return markup
 
@@ -194,11 +197,11 @@ def get_admin_keyboard():
 
 def get_unauthorized_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    button1 = types.KeyboardButton('/login')
-    button2 = types.KeyboardButton('/register')
+    button1 = types.KeyboardButton('Авторизация')
+    button2 = types.KeyboardButton('Регистрация')
 
     # Добавление кнопок на клавиатуру
-    markup.row(button1, button2)
+    markup.add(button1, button2)
 
     return markup
 
@@ -216,24 +219,27 @@ def start_handler(message):
         elif role == 'admin':
             bot.send_message(message.chat.id, f"Здравствуйте, {login}. Вы вошли как администратор.", reply_markup=get_admin_keyboard())
     else:
-        bot.send_message(message.chat.id, "Здравствуйте\nЕсли у Вас уже есть аккаунт, введите /login. \nЕсли нет - /register", reply_markup=get_unauthorized_keyboard())
+        bot.send_message(message.chat.id, "Здравствуйте\nЕсли у Вас уже есть аккаунт, введите <b>Авторизация</b>. \nЕсли нет - <b>Регистрация</b>", parse_mode="HTML", reply_markup=get_unauthorized_keyboard())
 
 # =========================
-# Обработка команд регистрация и авторизация
-@bot.message_handler(commands=['register', 'login'])
+# Обработчик для кнопки с текстом "Выход"
+@bot.message_handler(func=lambda message: message.text == "Выход")
+def handle_logout_button(message):
+    start_handler(message)
+    bot.send_message(message.chat.id, "Вы успешно вышли из аккаунта.")
+
+# Обработчик для кнопки с текстом "Авторизация"
+@bot.message_handler(func=lambda message: message.text in ["Авторизация", "Регистрация"])
 def reg_log_handler(message):
-    mode = 'reg' if message.text == '/register' else 'log'
+    mode = 'reg' if message.text == 'Регистрация' else 'log'
     
     bot.send_message(message.chat.id, "Введите логин:")
     bot.register_next_step_handler(message, process_reg_log, mode)
 
-# =========================
-# Обработка команды logout
-@bot.message_handler(commands=['logout'])
-def logout_handler(message):
-    logout(message.chat.id)
+# Обработчик для кнопки с текстом "Контакты"
+@bot.message_handler(func=lambda message: message.text == "Контактные данные")
+def handle_logout_button(message):
     start_handler(message)
     bot.send_message(message.chat.id, "Вы успешно вышли из аккаунта.")
-
 
 bot.polling(none_stop=True)
