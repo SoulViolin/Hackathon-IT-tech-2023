@@ -1,8 +1,11 @@
 # pip install pyTelegramBotAPI
+# pip install cryptography
 from settings import *
 import telebot
 from telebot import types
+from cryptography.fernet import Fernet
 import sqlite3
+import json
 
 bot = telebot.TeleBot(token, parse_mode=None)
 
@@ -18,6 +21,16 @@ def DBMS_Connection(query, values=''):
     conn.close()
 
     return result
+
+def get_admin_credentials():
+    # загрузим ключ для дешифровки данных
+    cipher_suite = Fernet(key)
+
+    # загружаем и дешифруем данные
+    decrypted_text = cipher_suite.decrypt(encrypted_data)
+
+    # преобразуем данные из bytes в Python dict и возвращаем
+    return json.loads(decrypted_text.decode())
 
 # Создание таблицы users
 DBMS_Connection('''
@@ -57,29 +70,66 @@ DBMS_Connection('''
 def process_reg_log(message, mode):
     login = message.text
     user_exist = DBMS_Connection('SELECT * FROM users WHERE login = ?', (login,)) is not None
-
+    
     if user_exist and mode == 'reg':
         bot.send_message(message.chat.id, f'Пользователь с логином {login} уже существует')
     elif not user_exist and mode == 'log':
         bot.send_message(message.chat.id, f'Пользователя с таким логином {login} не существует')
     else:
         bot.send_message(message.chat.id, "Введите пароль:")
-        bot.register_next_step_handler(message, process_password, login, mode)
+        bot.register_next_step_handler(message, process_role_pre_password, login, mode)
 
-def process_password(message, login, mode):
+def process_role_pre_password(message, login, mode):
     password = message.text
+    # Создание кнопок
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    button1 = types.KeyboardButton('1. Студент')
+    button2 = types.KeyboardButton('2. Преподаватель')
+    button3 = types.KeyboardButton('3. Администратор')
+
+    markup.row(button1)
+    markup.row(button2)
+    markup.row(button3)
+
+    msg = bot.send_message(message.chat.id, "Выберите роль:", reply_markup=markup)
+    bot.register_next_step_handler(msg, process_password, login, password, mode)
+
+def get_admin_credentials():
+    # загрузим ключ для дешифровки данных
+    cipher_suite = Fernet(key)
+
+    # загружаем и дешифруем данные
+    decrypted_text = cipher_suite.decrypt(encrypted_data)
+
+    # преобразуем данные из bytes в Python dict и возвращаем
+    return json.loads(decrypted_text.decode())
+
+def process_password(message, login, password, mode):
+    role = message.text
 
     if mode == 'reg':
-        DBMS_Connection("INSERT INTO users (chat_id, login, password, role) VALUES (?, ?, ?, ?)",
-                        (message.chat.id, login, password, 'student')
-                        )
-        bot.send_message(message.chat.id, "Вы успешно зарегистрированы")
+        admin_credentials = get_admin_credentials()
+        
+        if role == 'Администратор' and login == admin_credentials["login"] and password == admin_credentials["password"]:
+            DBMS_Connection("INSERT INTO users (chat_id, login, password, role) VALUES (?, ?, ?, ?)",
+                            (message.chat.id, login, password, 'admin')
+                            )
+            bot.send_message(message.chat.id, f"Вы были зарегистрированы как администратор")
+        elif role == 'Преподаватель':
+            DBMS_Connection("INSERT INTO users (chat_id, login, password, role) VALUES (?, ?, ?, ?)",
+                            (message.chat.id, login, password, 'teacher')
+                            )
+            bot.send_message(message.chat.id, f"Вы были зарегистрированы как преподаватель")
+        else:
+            DBMS_Connection("INSERT INTO users (chat_id, login, password, role) VALUES (?, ?, ?, ?)",
+                            (message.chat.id, login, password, 'student')
+                            )
+            bot.send_message(message.chat.id, f"Вы были зарегистрированы как студент")
     elif mode == 'log':
         stored_password = DBMS_Connection("SELECT password FROM users WHERE login = ?", (login,))[0]
         
         if stored_password == password:
             update_session_and_notify(message.chat.id, login)
-            
             start_handler(message)
         else:
             bot.send_message(message.chat.id, "Неверный пароль")
@@ -111,13 +161,30 @@ def get_student_keyboard():
     button3 = types.KeyboardButton('Материалы')
     button4 = types.KeyboardButton('Контакты')
     button5 = types.KeyboardButton('Информация об отделениях')
-    button6 = types.KeyboardButton('Выход')
+    button6 = types.KeyboardButton('Заявления')
+    button7 = types.KeyboardButton('Выход', )
+
+    # Добавление кнопок на клавиатуру
+    markup.row(button1, button2)
+    markup.row(button3)
+    markup.row(button4, button5, button6)
+    markup.row(button7)
+
+    return markup
+
+def get_teacher_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+
+    button1 = types.KeyboardButton('Расписание')
+    button2 = types.KeyboardButton('Заявления')
+    button3 = types.KeyboardButton('Материалы')
+    button4 = types.KeyboardButton('Контакты')
+    button5 = types.KeyboardButton('Выход', )
 
     # Добавление кнопок на клавиатуру
     markup.row(button1, button2)
     markup.row(button3)
     markup.row(button4, button5)
-    markup.row(button6)
 
     return markup
 
@@ -139,9 +206,11 @@ def start_handler(message):
 
     if login:
         if role == 'student':
-            bot.send_message(message.chat.id, f"Здравствуйте, {login}. Вы вошли как студент.", reply_markup=get_student_keyboard())
+            bot.send_message(message.chat.id, f"Здравствуйте, {login}. Вы вошли как студент.", reply_markup=get_admin_keyboard())
         elif role == 'teacher':
-            bot.send_message(message.chat.id, f"Здравствуйте, {login}. Вы вошли как преподаватель.")
+            bot.send_message(message.chat.id, f"Здравствуйте, {login}. Вы вошли как преподаватель.", reply_markup=get_teacher_keyboard())
+        elif role == 'admin':
+            bot.send_message(message.chat.id, f"Здравствуйте, {login}. Вы вошли как администратор.", reply_markup=get_student_keyboard())
     else:
         bot.send_message(message.chat.id, "Здравствуйте\nЕсли у Вас уже есть аккаунт, введите /login. \nЕсли нет - /register", reply_markup=get_unauthorized_keyboard())
 
