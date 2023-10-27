@@ -4,7 +4,10 @@ from settings import *
 import telebot
 from telebot import types
 from cryptography.fernet import Fernet
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from contextlib import closing
+import datetime
+import calendar
 import sqlite3
 import json
 
@@ -346,6 +349,101 @@ def reg_log_handler(message):
     bot.send_message(message.chat.id, "Введите логин:")
     bot.register_next_step_handler(message, process_reg_log, mode)
 
+# =============================================================================
+# Обработчик для кнопки с текстом "Расписание"
+def get_schedule_keyboard(role):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+
+    button1 = types.KeyboardButton('Выбор по дням недели')
+    button2 = types.KeyboardButton('Вернуться в главное меню')
+    
+    if role == 'student':
+        button3 = types.KeyboardButton('Выбор по преподователю')
+        markup.row(button1, button3)
+    elif role == 'teacher':
+        button3 = types.KeyboardButton('Выбор по группам')
+        markup.row(button1, button3)
+    
+    markup.row(button2)
+    return markup
+
+# Выход в главное меню роли
+@bot.message_handler(func=lambda message: message.text == "Вернуться в главное меню")
+def handle_menu_button(message):
+    login, role = check_auth(message.chat.id)
+
+    if role == 'student':
+        bot.send_message(message.chat.id, "Главное меню:", reply_markup=get_student_keyboard())
+    elif role == 'teacher':
+        bot.send_message(message.chat.id, "Главное меню:", reply_markup=get_teacher_keyboard())
+    elif role == 'admin':
+        bot.send_message(message.chat.id, "Главное меню:", reply_markup=get_admin_keyboard())
+    else:
+        bot.send_message(message.chat.id, "Вы не авторизованы. Выберите 'Авторизация' или 'Регистрация'", reply_markup=get_unauthorized_keyboard())
+
+# По дням недели
+# Создание инлайн клавиатуры для выбора даты
+def create_calendar(year, month):
+    markup = InlineKeyboardMarkup()
+
+    # Заголовки для дней недели
+    week_days = ["Mn", "Tu", "Wd", "Th", "Fr", "Sa", "Su"]
+
+    # Создание строки с текущим месяцем и годом
+    row = [InlineKeyboardButton(calendar.month_name[month] + " " + str(year), callback_data="ignore")]
+    markup.row(*row)
+
+    # Создание строки с днями недели
+    row = [InlineKeyboardButton(day, callback_data="ignore") for day in week_days]
+    markup.row(*row)
+
+    # Заполнение календаря датами
+    my_calendar = calendar.monthcalendar(year, month)
+    for week in my_calendar:
+        row = [
+                InlineKeyboardButton( " ", callback_data="ignore") if day == 0 else InlineKeyboardButton(str(day), callback_data=f"calendar-year-{year}-month-{month}-day-{day}")
+                for day in week]
+        markup.row(*row)
+
+    return markup
+
+@bot.message_handler(func=lambda message: message.text == "Выбор по дням недели")
+def get_date(message):
+
+    # Получаем текущую дату
+    now = datetime.datetime.now()
+    chat_id = message.chat.id
+
+    bot.send_message(chat_id, "Выберите дату", reply_markup=create_calendar(now.year,now.month))
+
+@bot.callback_query_handler(func=lambda call: 'calendar-year-' in call.data)
+def get_day(call):
+    selected_day = call.data.split('-')[-1]
+    selected_month = call.data.split('-')[-3]
+    selected_year = call.data.split('-')[-5]
+
+    bot.edit_message_text(chat_id=call.message.chat.id,
+                          message_id=call.message.message_id,
+                          text=f'Вы выбрали: {selected_day}.{selected_month}.{selected_year}')
+    selected_day = call.data.split('-')[-1]
+
+    bot.edit_message_text(chat_id=call.message.chat.id,
+                          message_id=call.message.message_id,
+                          text='Вы выбрали: '+selected_day)
+
+@bot.message_handler(func=lambda message: message.text == "Расписание")
+def handle_schedule_button(message):
+    login, role = check_auth(message.chat.id)
+
+    if login:
+        bot.send_message(message.chat.id, "Выберите одну из опций:", reply_markup=get_schedule_keyboard(role))
+    else:
+        bot.send_message(message.chat.id, "Ошибка авторизации. Пожалуйста, войдите в систему.")
+
+# Связанная функция с выбором расписания
+@bot.message_handler(func=lambda message: message.text in ['Выбор по дням недели', 'Выбор по преподователю', 'Выбор по группам'])
+def schedule_selection_handler(message):
+    pass
 # =============================================================================
 # Обработчик для кнопки с текстом "Контактные данные"
 def get_db_connection():
