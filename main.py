@@ -77,27 +77,25 @@ def process_reg_log(message, mode):
     user_exist = DBMS_Connection('SELECT * FROM users WHERE login = ?', (login,)) is not None
     
     if user_exist and mode == 'reg':
-        bot.send_message(message.chat.id, f'Пользователь с логином {login} уже существует')
-    elif not user_exist and mode == 'log':
-        bot.send_message(message.chat.id, f'Пользователя с таким логином {login} не существует')
-    else:
-        bot.send_message(message.chat.id, "Введите пароль:")
-        bot.register_next_step_handler(message, process_role_password, login, mode)
+        bot.send_message(message.chat.id, f'Пользователь с логином {login} уже существует', reply_markup=get_unauthorized_keyboard())
+        return
+    if not user_exist and mode == 'log':
+        bot.send_message(message.chat.id, f'Пользователя с таким логином не существует', reply_markup=get_unauthorized_keyboard())
+        return
+
+    bot.send_message(message.chat.id, "Введите пароль:")
+    bot.register_next_step_handler(message, process_role_password, login, mode)
 
 def process_role_password(message, login, mode):
-    if mode == 'reg':
-        password = message.text
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        button1 = types.KeyboardButton('Студент')
-        button2 = types.KeyboardButton('Преподаватель')
-        button3 = types.KeyboardButton('Администратор')
+    password = message.text
 
-        markup.row(button1)
-        markup.row(button2)
-        markup.row(button3)
+    if mode == 'reg':
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        buttons = [types.KeyboardButton(role) for role in ['Студент', 'Преподаватель', 'Администратор']]
+        [markup.row(button) for button in buttons]
 
         msg = bot.send_message(message.chat.id, "Выберите роль:", reply_markup=markup)
-        bot.register_next_step_handler(msg, process_password, login, password, mode)
+        bot.register_next_step_handler(msg, request_data_processing_permission, login, password, mode)
     elif mode == 'log':
         password = message.text
         stored_password = DBMS_Connection("SELECT password FROM users WHERE login = ?", (login,))[0]
@@ -108,37 +106,47 @@ def process_role_password(message, login, mode):
         else:
             bot.send_message(message.chat.id, "Невёрный пароль")
 
-def get_admin_credentials():
-    # загрузим ключ для дешифровки данных
-    cipher_suite = Fernet(key)
-
-    # загружаем и дешифруем данные
-    decrypted_text = cipher_suite.decrypt(encrypted_data)
-
-    # преобразуем данные из bytes в Python dict и возвращаем
-    return json.loads(decrypted_text.decode())
-
-def process_password(message, login, password, mode):
+def request_data_processing_permission(message, login, password, mode):
     role = message.text
 
+    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True)
+    markup.add('Да', 'Нет')
+    mes = bot.send_message(
+        message.chat.id,
+        'Для продолжения работы с ботом необходимо разрешение на обработку персональных данных. \nВы даётесь разрешение на обработку персональных данных?',
+        reply_markup=markup
+    )
+    bot.register_next_step_handler(mes, process_data_processing_reply, login, password, mode, role)
+
+def process_data_processing_reply(message, login, password, mode, role):
+    if message.text.lower() != 'да':
+        bot.send_message(message.chat.id, 'Повторите попытку позже.', reply_markup=get_unauthorized_keyboard())
+        return
+    process_password(message, login, password, mode, role)
+
+def get_admin_credentials():
+    cipher_suite = Fernet(key)
+    decrypted_text = cipher_suite.decrypt(encrypted_data)
+    return json.loads(decrypted_text.decode())
+
+def process_password(message, login, password, mode, role):
     admin_credentials = get_admin_credentials()
 
+    roles_dic = {'Администратор':'Студент', 'Преподаватель':'teacher', 'Студент':'student'}
     if role == 'Администратор' and login == admin_credentials["login"] and password == admin_credentials["password"]:
         DBMS_Connection("INSERT INTO users (chat_id, login, password, role) VALUES (?, ?, ?, ?)",
-                        (message.chat.id, login, password, 'admin')
+                        (message.chat.id, None, None, 'admin')
                         )
-        bot.send_message(message.chat.id, f"Вы были зарегистрированы как администратор")
-    elif role == 'Преподаватель':
-        DBMS_Connection("INSERT INTO users (chat_id, login, password, role) VALUES (?, ?, ?, ?)",
-                        (message.chat.id, login, password, 'teacher')
-                        )
-        bot.send_message(message.chat.id, f"Вы были зарегистрированы как преподаватель")
+        bot.send_message(message.chat.id, f"Вы были зарегистрированы как Администратор.", reply_markup=get_admin_keyboard())
     else:
-        DBMS_Connection("INSERT INTO users (chat_id, login, password, role) VALUES (?, ?, ?, ?)",
-                        (message.chat.id, login, password, 'student')
-                        )
-        bot.send_message(message.chat.id, f"Вы были зарегистрированы как студент")
-    start_handler(message)
+        DBMS_Connection(
+            "INSERT INTO users (chat_id, login, password, role) VALUES (?, ?, ?, ?)",
+            (message.chat.id, login, password, roles_dic.get(role, 'student'))
+        )
+        if role == 'Преподаватель':
+            bot.send_message(message.chat.id, f"Вы были зарегистрированы как Преподаватель.", reply_markup=get_teacher_keyboard())
+        else:
+            bot.send_message(message.chat.id, f"Вы были зарегистрированы как Студент.", reply_markup=get_student_keyboard())
 
 # Проверяет, авторизован ли пользователь, и возвращает его login и role, если он авторизован 
 def check_auth(chat_id):
@@ -177,6 +185,7 @@ def get_student_keyboard():
     markup.row(button7)
 
     return markup
+
 
 def get_teacher_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
